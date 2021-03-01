@@ -14,7 +14,7 @@ const (
 )
 
 var (
-	ErrOpen = errors.New("Circuit breaker is opened")
+	ErrOpened = errors.New("Circuit breaker is opened")
 )
 
 type Counter struct {
@@ -63,21 +63,33 @@ type CircuitBreaker struct {
 	samplingPeriodInMs   int64   // counter reset when sampling period is over
 	failureRateThreshold float64 // trip breaker from CLOSED to OPENED when threshold exceed
 	successRateThreshold float64 // trip breaker from OPENED to CLOSED when threshold exceed
-	halfOpenTimeoutMs    int64   // trip breaker from OPENED to HALF-OPENED after timeout exceed
+	halfOpenTimeoutInMs  int64   // trip breaker from OPENED to HALF-OPENED after timeout exceed
 }
 
-func New(samplingPeriodInMs int64, failureRateThreshold, successRateThreshold float64, halfOpenTimeoutMs int64) *CircuitBreaker {
+func New(samplingPeriodInMs, halfOpenTimeoutInMs int64, failureRateThreshold, successRateThreshold float64) *CircuitBreaker {
 	return &CircuitBreaker{
-		state:              close,
-		counter:            NewCounter(),
-		samplingPeriodInMs: samplingPeriodInMs,
+		state:                close,
+		counter:              NewCounter(),
+		samplingPeriodInMs:   samplingPeriodInMs,
+		failureRateThreshold: failureRateThreshold,
+		successRateThreshold: successRateThreshold,
+		halfOpenTimeoutInMs:  halfOpenTimeoutInMs,
 	}
+}
+
+const DefaultSamplingPeriodInMs = 1000
+const DefaultHalfOpenTimeoutInMs = 500
+const DefaultFailureRateThreshold = 0.3
+const DefaultSuccessRateThreshold = 0.8
+
+func DefaultCircuitBreaker() *CircuitBreaker {
+	return New(DefaultSamplingPeriodInMs, DefaultHalfOpenTimeoutInMs, DefaultFailureRateThreshold, DefaultSuccessRateThreshold)
 }
 
 func (cb *CircuitBreaker) Run(runnable func() (interface{}, error)) (interface{}, error) {
 	cb.evaluteState()
 	if cb.state == open {
-		return nil, ErrOpen
+		return nil, ErrOpened
 	}
 	result, err := runnable()
 	cb.recordStat(err)
@@ -97,7 +109,7 @@ func (cb *CircuitBreaker) recordStat(err error) {
 }
 
 func (cb *CircuitBreaker) evaluteState() {
-	if cb.state == open && now()-cb.counter.started > (cb.halfOpenTimeoutMs*1000) {
+	if cb.state == open && now()-cb.counter.started > (cb.halfOpenTimeoutInMs*1000) {
 		cb.changeState(halfOpen)
 	} else if cb.state == close {
 		// might go to OPEN
